@@ -1,5 +1,4 @@
 # src/views/contacts_view.py
-import inspect
 import os
 import shutil
 import uuid
@@ -12,38 +11,36 @@ from database.crud import (
 )
 from utils.theme import pad_symmetric, align_center
 
-# Assets and upload path resolution relative to project root
-PROJECT_ROOT = os.getcwd()
+# Absolute path resolutions for local uploads folder
+THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+SRC_DIR = os.path.dirname(THIS_DIR)
+PROJECT_ROOT = os.path.dirname(SRC_DIR)
 ASSETS_DIR = os.path.join(PROJECT_ROOT, "assets")
 UPLOAD_DIR = os.path.join(ASSETS_DIR, "uploads", "contacts")
 
 
 def open_dialog_compat(page: ft.Page, dialog: ft.AlertDialog):
-    """Safely attaches dialogs to page overlay and displays them across Flet versions."""
-    if dialog not in page.overlay:
-        page.overlay.append(dialog)
-    dialog.open = True
+    """Safely displays dialogs using mutually exclusive branching to prevent duplicate overlay crashes."""
     if hasattr(page, "open") and callable(getattr(page, "open")):
-        try:
-            page.open(dialog)
-        except Exception:
-            pass
-    page.update()
+        page.open(dialog)
+    else:
+        if dialog not in page.overlay:
+            page.overlay.append(dialog)
+        dialog.open = True
+        page.update()
 
 
 def close_dialog_compat(page: ft.Page, dialog: ft.AlertDialog):
     """Safely closes dialogs across Flet API revisions."""
-    dialog.open = False
     if hasattr(page, "close") and callable(getattr(page, "close")):
-        try:
-            page.close(dialog)
-        except Exception:
-            pass
-    page.update()
+        page.close(dialog)
+    else:
+        dialog.open = False
+        page.update()
 
 
 def show_snackbar(page: ft.Page, message: str):
-    """Safely displays a temporary SnackBar feedback notification across Flet API revisions."""
+    """Displays a temporary feedback notification banner."""
     snack = ft.SnackBar(content=ft.Text(message, color="onPrimary"), bgcolor="primary", open=True)
     if hasattr(page, "open") and callable(getattr(page, "open")):
         try:
@@ -104,7 +101,7 @@ class ContactsView(ft.Container):
         self.editing_contact_id = None
         self.selected_image_path = None
 
-        # Ensure destination uploads directory exists on disk
+        # Ensure destination uploads directory exists
         os.makedirs(UPLOAD_DIR, exist_ok=True)
 
         # Form Controls
@@ -121,7 +118,7 @@ class ContactsView(ft.Container):
             expand=True,
         )
         self.error_text = ft.Text("", color="error", size=12)
-        self.photo_status_text = ft.Text("", size=11, color="primary", weight=ft.FontWeight.W_500)
+        self.photo_status_text = ft.Text("", size=11, weight=ft.FontWeight.W_600)
 
         # Search Control
         self.search_input = ft.TextField(
@@ -131,7 +128,7 @@ class ContactsView(ft.Container):
             on_change=self._handle_search,
         )
 
-        # Preview Container inside Dialog
+        # Modal Avatar Preview Container
         self.modal_avatar_container = ft.Container(
             width=110,
             height=110,
@@ -158,7 +155,7 @@ class ContactsView(ft.Container):
                             vertical_alignment=cross_align_start,
                             spacing=20,
                             controls=[
-                                # 1/5th Image Preview Column
+                                # Image Preview Column
                                 ft.Column(
                                     horizontal_alignment=cross_align_center,
                                     spacing=8,
@@ -171,7 +168,7 @@ class ContactsView(ft.Container):
                                         self.photo_status_text,
                                     ],
                                 ),
-                                # 4/5ths Input Controls Column
+                                # Input Controls Column
                                 ft.Column(
                                     expand=True,
                                     spacing=12,
@@ -214,6 +211,21 @@ class ContactsView(ft.Container):
 
         self._load_data()
 
+    def _get_file_picker(self) -> ft.FilePicker:
+        """Retrieves or instantiates global FilePicker service attached to Page."""
+        fp = getattr(self.app_page, "file_picker", None)
+        if not fp:
+            fp = ft.FilePicker()
+            self.app_page.file_picker = fp
+
+        if hasattr(self.app_page, "open") and callable(getattr(self.app_page, "open")):
+            try:
+                self.app_page.open(fp)
+            except Exception:
+                pass
+
+        return fp
+
     def _build_header(self) -> ft.Row:
         return ft.Row(
             alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
@@ -229,8 +241,12 @@ class ContactsView(ft.Container):
         )
 
     def _load_data(self) -> None:
-        self.contacts = get_contacts()
-        self.filtered_contacts = list(self.contacts)
+        try:
+            self.contacts = get_contacts()
+            self.filtered_contacts = list(self.contacts)
+        except Exception:
+            self.contacts = []
+            self.filtered_contacts = []
         self._render_contact_list()
 
     def _handle_search(self, e: ft.ControlEvent) -> None:
@@ -249,78 +265,67 @@ class ContactsView(ft.Container):
         self.update()
 
     def _copy_image_to_uploads(self, source_path: str) -> str:
-        """Copies source image into assets/uploads/contacts/ and returns relative asset path."""
-        if not source_path or not os.path.exists(source_path):
+        """Copies source file into assets/uploads/contacts/ and returns relative asset path."""
+        if not source_path:
+            return source_path
+
+        abs_source = os.path.abspath(source_path)
+        if not os.path.exists(abs_source):
             return source_path
 
         os.makedirs(UPLOAD_DIR, exist_ok=True)
-
-        abs_source = os.path.abspath(source_path)
         abs_upload = os.path.abspath(UPLOAD_DIR)
 
         # Avoid re-copying if image is already inside upload directory
         if abs_source.startswith(abs_upload):
-            rel_path = os.path.relpath(abs_source, ASSETS_DIR).replace("\\", "/")
-            return f"/{rel_path}"
+            filename = os.path.basename(abs_source)
+            return f"/uploads/contacts/{filename}"
 
         file_ext = os.path.splitext(source_path)[1].lower() or ".png"
         unique_filename = f"contact_{uuid.uuid4().hex[:10]}{file_ext}"
         destination_path = os.path.join(UPLOAD_DIR, unique_filename)
 
-        shutil.copy2(source_path, destination_path)
+        try:
+            shutil.copy2(abs_source, destination_path)
+        except Exception:
+            return source_path
 
-        rel_path = os.path.relpath(destination_path, ASSETS_DIR).replace("\\", "/")
-        return f"/{rel_path}"
-
-    def _resolve_image_src_and_validity(self, image_path: str):
-        """Resolves asset path and validates file presence on local disk."""
-        if not image_path:
-            return None, False
-
-        # Relative asset path check (e.g., /uploads/contacts/contact_123.png)
-        if image_path.startswith("/") or image_path.startswith("\\") or image_path.startswith("uploads"):
-            clean_rel = image_path.lstrip("/\\")
-            full_disk_path = os.path.join(ASSETS_DIR, clean_rel)
-            if os.path.exists(full_disk_path):
-                return f"/{clean_rel.replace('\\', '/')}", True
-
-        # Fallback for legacy absolute paths
-        if os.path.exists(image_path):
-            rel_path = self._copy_image_to_uploads(image_path)
-            return rel_path, True
-
-        return None, False
+        return f"/uploads/contacts/{unique_filename}"
 
     def _create_avatar_control(self, name: str, image_path: str = None, radius: int = 24) -> ft.Control:
-        """Generates thumbnail controls: ft.Image in clipped Container if valid, otherwise CircleAvatar."""
+        """Generates thumbnail controls: ft.Image using relative asset path if valid file exists on disk."""
         initial = name[0].upper() if name and len(name) > 0 else "?"
         size_dim = radius * 2
 
-        src_url, is_valid = self._resolve_image_src_and_validity(image_path)
+        if image_path and isinstance(image_path, str) and len(image_path.strip()) > 0:
+            clean_rel = "/" + image_path.lstrip("/\\").replace("\\", "/")
+            disk_rel = clean_rel.lstrip("/")
+            full_disk_path = os.path.normpath(os.path.join(ASSETS_DIR, disk_rel))
 
-        if is_valid and src_url:
-            img_fit = getattr(ft.ImageFit, "COVER", "cover")
-            clip_hard = getattr(ft.ClipBehavior, "HARD_EDGE", "hardEdge")
-            return ft.Container(
-                width=size_dim,
-                height=size_dim,
-                border_radius=radius,
-                clip_behavior=clip_hard,
-                content=ft.Image(
-                    src=src_url,
+            if os.path.exists(full_disk_path) or os.path.exists(image_path):
+                img_fit = getattr(ft.ImageFit, "COVER", "cover")
+                clip_hard = getattr(ft.ClipBehavior, "HARD_EDGE", "hardEdge")
+
+                return ft.Container(
                     width=size_dim,
                     height=size_dim,
-                    fit=img_fit,
-                    error_content=ft.CircleAvatar(
-                        content=ft.Text(initial, weight=ft.FontWeight.BOLD, size=radius - 2, color="onPrimaryContainer"),
-                        bgcolor="primaryContainer",
-                        radius=radius,
+                    border_radius=radius,
+                    clip_behavior=clip_hard,
+                    content=ft.Image(
+                        src=clean_rel,
+                        width=size_dim,
+                        height=size_dim,
+                        fit=img_fit,
+                        error_content=ft.CircleAvatar(
+                            content=ft.Text(initial, weight=ft.FontWeight.BOLD, size=max(10, radius - 2), color="onPrimaryContainer"),
+                            bgcolor="primaryContainer",
+                            radius=radius,
+                        ),
                     ),
-                ),
-            )
+                )
 
         return ft.CircleAvatar(
-            content=ft.Text(initial, weight=ft.FontWeight.BOLD, size=radius - 2, color="onPrimaryContainer"),
+            content=ft.Text(initial, weight=ft.FontWeight.BOLD, size=max(10, radius - 2), color="onPrimaryContainer"),
             bgcolor="primaryContainer",
             radius=radius,
         )
@@ -458,7 +463,8 @@ class ContactsView(ft.Container):
         )
         if self.selected_image_path:
             filename = os.path.basename(self.selected_image_path)
-            self.photo_status_text.value = f"Photo attached:\n{filename[:15]}..."
+            self.photo_status_text.value = f"✓ Attached:\n{filename[:16]}"
+            self.photo_status_text.color = "green"
         else:
             self.photo_status_text.value = ""
 
@@ -493,42 +499,37 @@ class ContactsView(ft.Container):
     def _close_dialog(self, e: ft.ControlEvent = None) -> None:
         close_dialog_compat(self.app_page, self.contact_dialog)
 
-    async def _pick_image_file(self, e: ft.ControlEvent) -> None:
-        """Asynchronously triggers FilePicker dialog."""
-        file_picker = getattr(self.app_page, "file_picker", None)
-        if not file_picker:
-            self.error_text.value = "File picker control unavailable."
-            self.app_page.update()
-            return
-
-        file_picker.on_result = self._handle_file_picked
+    def _pick_image_file(self, e: ft.ControlEvent) -> None:
+        """Triggers FilePicker registered on page session."""
+        fp = self._get_file_picker()
+        fp.on_result = self._handle_file_picked
 
         try:
-            res = file_picker.pick_files(
+            fp.pick_files(
                 dialog_title="Select Contact Photo",
                 allow_multiple=False,
                 file_type=ft.FilePickerFileType.IMAGE,
             )
-            if inspect.isawaitable(res):
-                result = await res
-                if result and hasattr(result, "files") and result.files:
-                    self._handle_file_picked(result)
         except Exception as ex:
             self.error_text.value = f"Unable to open file picker: {str(ex)}"
             self.app_page.update()
 
     def _handle_file_picked(self, e: ft.FilePickerResultEvent) -> None:
-        """Handles selected image event and saves relative asset path."""
-        if e and hasattr(e, "files") and e.files and len(e.files) > 0:
-            picked_path = e.files[0].path or e.files[0].name
-            saved_rel_path = self._copy_image_to_uploads(picked_path)
-            self.selected_image_path = saved_rel_path
+        """Event callback triggered when user selects a file in the OS dialog."""
+        if not e or not hasattr(e, "files") or not e.files or len(e.files) == 0:
+            return
+
+        file_item = e.files[0]
+        picked_path = getattr(file_item, "path", None) or getattr(file_item, "name", None)
+
+        if picked_path:
+            rel_asset_path = self._copy_image_to_uploads(picked_path)
+            self.selected_image_path = rel_asset_path
             self._update_modal_avatar_preview()
-            if hasattr(self.contact_dialog, "update") and callable(getattr(self.contact_dialog, "update")):
-                try:
-                    self.contact_dialog.update()
-                except Exception:
-                    pass
+            try:
+                self.contact_dialog.update()
+            except Exception:
+                pass
             self.app_page.update()
 
     def _handle_save_contact(self, e: ft.ControlEvent) -> None:
@@ -554,7 +555,7 @@ class ContactsView(ft.Container):
                 notes=notes,
                 image_path=self.selected_image_path,
             )
-            action_msg = f"Contact '{name}' created successfully!"
+            action_msg = f"Contact '{name}' saved successfully!"
         else:
             update_contact(
                 contact_id=self.editing_contact_id,

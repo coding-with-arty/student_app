@@ -11,13 +11,14 @@ from views.degree_view import DegreeView
 from views.contacts_view import ContactsView
 from views.settings_view import SettingsView
 
-# Dynamically resolve project root and root assets directory
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Resolve project root and assets directory paths dynamically
+THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(THIS_DIR)
 ASSETS_DIR = os.path.join(PROJECT_ROOT, "assets")
 
 
 def main(page: ft.Page):
-    # Initialize SQLite database and run schema migrations
+    # Initialize SQLite database schema
     init_db()
 
     # Apply global theme defaults
@@ -26,14 +27,20 @@ def main(page: ft.Page):
     # Attach global App Bar
     page.appbar = create_app_bar(page, title="Student Portal")
 
-    # Instantiate single global FilePicker service and attach to page instance
+    # Instantiate global FilePicker service on page session without adding to page.overlay
     global_file_picker = ft.FilePicker()
     page.file_picker = global_file_picker
 
-    # Main view display container
+    if hasattr(page, "services"):
+        try:
+            page.services.append(global_file_picker)
+        except Exception:
+            pass
+
+    # Main view content container
     content_area = ft.Container(expand=True)
 
-    # Navigation destination icons
+    # Navigation icons
     icon_dashboard = getattr(ft.Icons, "DASHBOARD_OUTLINE", getattr(ft.Icons, "DASHBOARD", "dashboard"))
     icon_schedule = getattr(ft.Icons, "CALENDAR_MONTH_OUTLINE", getattr(ft.Icons, "CALENDAR_MONTH", "calendar_month"))
     icon_assignments = getattr(ft.Icons, "ASSIGNMENT_OUTLINE", getattr(ft.Icons, "ASSIGNMENT", "assignment"))
@@ -98,10 +105,9 @@ def main(page: ft.Page):
         on_change=on_nav_change,
     )
 
-    # Load initial Dashboard view
+    # Initial view load
     content_area.content = DashboardView(page)
 
-    # Attach root layout with stretched alignment to prevent NavigationRail overflow
     page.add(
         ft.Row(
             expand=True,
@@ -117,9 +123,7 @@ def main(page: ft.Page):
 
 
 if __name__ == "__main__":
-    # Ensure assets directory exists on disk prior to app startup
     os.makedirs(ASSETS_DIR, exist_ok=True)
-
     if hasattr(ft, "run"):
         ft.run(main, assets_dir=ASSETS_DIR)
     elif hasattr(ft, "app"):
