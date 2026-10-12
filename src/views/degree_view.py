@@ -1,4 +1,5 @@
 # src/views/degree_view.py
+import inspect
 import os
 import flet as ft
 from database.crud import (
@@ -11,27 +12,11 @@ from database.crud import (
     create_degree_requirement,
     delete_degree_requirement,
 )
+from utils.theme import pad_symmetric
 
 STATUS_COMPLETED = "Completed"
 STATUS_IN_PROGRESS = "In-Progress"
 STATUS_PLANNED = "Planned"
-
-
-def pad_symmetric(horizontal: float = 0, vertical: float = 0):
-    """Cross-version symmetric padding helper."""
-    if hasattr(ft, "padding") and hasattr(ft.padding, "symmetric"):
-        try:
-            return ft.padding.symmetric(horizontal=horizontal, vertical=vertical)
-        except Exception:
-            pass
-    if hasattr(ft, "padding") and hasattr(ft.padding, "only"):
-        try:
-            return ft.padding.only(
-                left=horizontal, right=horizontal, top=vertical, bottom=vertical
-            )
-        except Exception:
-            pass
-    return 0
 
 
 def create_primary_button(text: str, icon=None, on_click=None) -> ft.Container:
@@ -114,9 +99,6 @@ class DegreeView(ft.Container):
         self.editing_req_id = None
         self.total_credits_required = 120
         self.degree_contract_path = None
-
-        # File picker for uploading degree enrollment contract initialized lazily
-        self.file_picker = ft.FilePicker(on_result=self._handle_file_picked)
 
         # Requirement Form controls
         self.course_code_input = ft.TextField(label="Course Code", hint_text="CS201", expand=True)
@@ -494,20 +476,31 @@ class DegreeView(ft.Container):
     def _close_settings_dialog(self, e: ft.ControlEvent = None) -> None:
         close_dialog_compat(self.app_page, self.settings_dialog)
 
-    def _pick_contract_file(self, e: ft.ControlEvent) -> None:
-        # Safely bind FilePicker to page overlay at runtime right before invocation
-        if self.file_picker not in self.app_page.overlay:
-            self.app_page.overlay.append(self.file_picker)
+    async def _pick_contract_file(self, e: ft.ControlEvent) -> None:
+        """Asynchronously invokes FilePicker and awaits results across modern Flet versions."""
+        file_picker = getattr(self.app_page, "file_picker", None)
+        if not file_picker:
+            self.settings_error_text.value = "File picker control unavailable."
+            self.app_page.update()
+            return
+
+        file_picker.on_result = self._handle_file_picked
+
+        try:
+            res = file_picker.pick_files(
+                dialog_title="Select Degree Enrollment Contract",
+                allow_multiple=False,
+            )
+            if inspect.isawaitable(res):
+                result = await res
+                if result and hasattr(result, "files") and result.files:
+                    self._handle_file_picked(result)
+        except Exception as ex:
+            self.settings_error_text.value = f"Unable to open file picker: {str(ex)}"
             self.app_page.update()
 
-        self.file_picker.pick_files(
-            dialog_title="Select Degree Enrollment Contract",
-            allow_multiple=False,
-            allowed_extensions=["pdf", "doc", "docx", "png", "jpg"],
-        )
-
     def _handle_file_picked(self, e: ft.FilePickerResultEvent) -> None:
-        if e.files and len(e.files) > 0:
+        if e and hasattr(e, "files") and e.files and len(e.files) > 0:
             picked_path = e.files[0].path or e.files[0].name
             self.degree_contract_path = picked_path
             self.contract_file_text.value = f"Selected: {os.path.basename(picked_path)}"

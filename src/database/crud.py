@@ -2,10 +2,10 @@
 from typing import List, Optional
 from sqlalchemy.orm import joinedload
 from database.connection import get_db_session
-from database.models import Course, ScheduleBlock, Assignment, DegreeRequirement, StudentProfile
+from database.models import Course, ScheduleBlock, Assignment, DegreeRequirement, StudentProfile, Contact
 
 
-# --- Student Profile & Degree Settings Operations ---
+# --- Student Profile Operations ---
 def get_student_profile() -> Optional[StudentProfile]:
     with get_db_session() as db:
         return db.query(StudentProfile).first()
@@ -37,7 +37,6 @@ def update_student_profile(
 def update_degree_settings(
     total_credits: int, contract_path: Optional[str] = None
 ) -> StudentProfile:
-    """Updates required graduation credits and degree contract path in database."""
     with get_db_session() as db:
         profile = db.query(StudentProfile).first()
         if not profile:
@@ -57,6 +56,81 @@ def update_degree_settings(
         db.flush()
         db.refresh(profile)
         return profile
+
+
+# --- Contact Operations ---
+def get_contacts() -> List[Contact]:
+    """Retrieves all contacts sorted alphabetically by name."""
+    with get_db_session() as db:
+        return db.query(Contact).order_by(Contact.name.asc()).all()
+
+
+def get_contact(contact_id: int) -> Optional[Contact]:
+    """Retrieves a single contact record by ID."""
+    with get_db_session() as db:
+        return db.query(Contact).filter(Contact.id == contact_id).first()
+
+
+def create_contact(
+    name: str,
+    email: Optional[str] = None,
+    phone: Optional[str] = None,
+    address: Optional[str] = None,
+    links: Optional[str] = None,
+    notes: Optional[str] = None,
+    image_path: Optional[str] = None,
+) -> Contact:
+    """Creates a new contact in the address book."""
+    with get_db_session() as db:
+        contact = Contact(
+            name=name,
+            email=email,
+            phone=phone,
+            address=address,
+            links=links,
+            notes=notes,
+            image_path=image_path,
+        )
+        db.add(contact)
+        db.flush()
+        db.refresh(contact)
+        return contact
+
+
+def update_contact(
+    contact_id: int,
+    name: str,
+    email: Optional[str] = None,
+    phone: Optional[str] = None,
+    address: Optional[str] = None,
+    links: Optional[str] = None,
+    notes: Optional[str] = None,
+    image_path: Optional[str] = None,
+) -> Optional[Contact]:
+    """Updates an existing contact record."""
+    with get_db_session() as db:
+        contact = db.query(Contact).filter(Contact.id == contact_id).first()
+        if contact:
+            contact.name = name
+            contact.email = email
+            contact.phone = phone
+            contact.address = address
+            contact.links = links
+            contact.notes = notes
+            contact.image_path = image_path
+            db.flush()
+            db.refresh(contact)
+        return contact
+
+
+def delete_contact(contact_id: int) -> bool:
+    """Deletes a contact record by ID."""
+    with get_db_session() as db:
+        contact = db.query(Contact).filter(Contact.id == contact_id).first()
+        if contact:
+            db.delete(contact)
+            return True
+        return False
 
 
 # --- Course Operations ---

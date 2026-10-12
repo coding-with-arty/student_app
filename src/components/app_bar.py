@@ -3,35 +3,26 @@ import flet as ft
 from utils.theme import ThemeManager
 
 
-def create_app_bar(page: ft.Page, on_menu_click) -> ft.AppBar:
-    """Constructs the top AppBar with menu toggle, title, and theme switch."""
+def create_app_bar(page: ft.Page, title: str = "Student Portal") -> ft.AppBar:
+    """Creates a standardized App Bar component with dynamic theme toggling via ThemeManager."""
+    icon_school = getattr(ft.Icons, "SCHOOL", "school")
 
-    def handle_theme_change(e: ft.ControlEvent):
+    def handle_theme_toggle(e):
         ThemeManager.toggle_theme(page)
+        e.control.icon = ThemeManager.get_toggle_icon(page)
+        e.control.update()
 
     return ft.AppBar(
-        leading=ft.IconButton(
-            icon=ft.Icons.MENU,
-            tooltip="Toggle Sidebar",
-            on_click=on_menu_click,
-        ),
+        leading=ft.Icon(icon_school, size=24, color="primary"),
         leading_width=40,
-        title=ft.Text("Student Portal", weight=ft.FontWeight.BOLD, size=20),
+        title=ft.Text(title, weight=ft.FontWeight.BOLD, size=20),
         center_title=False,
-        bgcolor=ft.Colors.SURFACE_CONTAINER_HIGHEST if hasattr(ft, "Colors") else "surfaceVariant",
+        bgcolor=getattr(ft.Colors, "SURFACE_CONTAINER_HIGHEST", "surfaceVariant"),
         actions=[
-            ft.Row(
-                controls=[
-                    ft.Icon(ft.Icons.LIGHT_MODE_OUTLINED, size=20),
-                    ft.Switch(
-                        value=page.theme_mode == ft.ThemeMode.DARK,
-                        on_change=handle_theme_change,
-                        tooltip="Toggle Light/Dark Theme",
-                    ),
-                    ft.Icon(ft.Icons.DARK_MODE_OUTLINED, size=20),
-                ],
-                alignment=ft.MainAxisAlignment.CENTER,
+            ft.IconButton(
+                icon=ThemeManager.get_toggle_icon(page),
+                tooltip="Toggle Dark/Light Theme",
+                on_click=handle_theme_toggle,
             ),
-            ft.Container(width=16),
         ],
     )

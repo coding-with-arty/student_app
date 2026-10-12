@@ -79,3 +79,16 @@ class StudentProfile(Base):
     email: Mapped[str] = mapped_column(String(100), nullable=False, default="alex.johnson@university.edu")
     total_credits_required: Mapped[int] = mapped_column(Integer, nullable=False, default=120)
     degree_contract_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+
+
+class Contact(Base):
+    __tablename__ = "contacts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    email: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    phone: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    address: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    links: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
+    image_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
