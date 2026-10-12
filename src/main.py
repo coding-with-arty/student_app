@@ -1,4 +1,5 @@
 # src/main.py
+import os
 import flet as ft
 from database.connection import init_db
 from components.app_bar import create_app_bar
@@ -9,6 +10,10 @@ from views.assignments_view import AssignmentsView
 from views.degree_view import DegreeView
 from views.contacts_view import ContactsView
 from views.settings_view import SettingsView
+
+# Dynamically resolve project root and root assets directory
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ASSETS_DIR = os.path.join(PROJECT_ROOT, "assets")
 
 
 def main(page: ft.Page):
@@ -112,13 +117,10 @@ def main(page: ft.Page):
 
 
 if __name__ == "__main__":
-    if hasattr(ft, "run") and callable(getattr(ft, "run")):
-        ft.run(main)
-    elif hasattr(ft, "app") and callable(getattr(ft, "app")):
-        ft.app(target=main)
-    else:
-        import flet
-        if hasattr(flet, "run"):
-            flet.run(main)
-        elif hasattr(flet, "app"):
-            flet.app(target=main)
+    # Ensure assets directory exists on disk prior to app startup
+    os.makedirs(ASSETS_DIR, exist_ok=True)
+
+    if hasattr(ft, "run"):
+        ft.run(main, assets_dir=ASSETS_DIR)
+    elif hasattr(ft, "app"):
+        ft.app(target=main, assets_dir=ASSETS_DIR)

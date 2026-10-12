@@ -1,6 +1,8 @@
 # src/views/contacts_view.py
 import inspect
 import os
+import shutil
+import uuid
 import flet as ft
 from database.crud import (
     get_contacts,
@@ -9,6 +11,11 @@ from database.crud import (
     delete_contact,
 )
 from utils.theme import pad_symmetric, align_center
+
+# Assets and upload path resolution relative to project root
+PROJECT_ROOT = os.getcwd()
+ASSETS_DIR = os.path.join(PROJECT_ROOT, "assets")
+UPLOAD_DIR = os.path.join(ASSETS_DIR, "uploads", "contacts")
 
 
 def open_dialog_compat(page: ft.Page, dialog: ft.AlertDialog):
@@ -32,6 +39,20 @@ def close_dialog_compat(page: ft.Page, dialog: ft.AlertDialog):
             page.close(dialog)
         except Exception:
             pass
+    page.update()
+
+
+def show_snackbar(page: ft.Page, message: str):
+    """Safely displays a temporary SnackBar feedback notification across Flet API revisions."""
+    snack = ft.SnackBar(content=ft.Text(message, color="onPrimary"), bgcolor="primary", open=True)
+    if hasattr(page, "open") and callable(getattr(page, "open")):
+        try:
+            page.open(snack)
+            return
+        except Exception:
+            pass
+    page.snack_bar = snack
+    snack.open = True
     page.update()
 
 
@@ -83,6 +104,9 @@ class ContactsView(ft.Container):
         self.editing_contact_id = None
         self.selected_image_path = None
 
+        # Ensure destination uploads directory exists on disk
+        os.makedirs(UPLOAD_DIR, exist_ok=True)
+
         # Form Controls
         self.name_input = ft.TextField(label="Full Name*", expand=True)
         self.email_input = ft.TextField(label="Email Address", expand=True)
@@ -97,6 +121,7 @@ class ContactsView(ft.Container):
             expand=True,
         )
         self.error_text = ft.Text("", color="error", size=12)
+        self.photo_status_text = ft.Text("", size=11, color="primary", weight=ft.FontWeight.W_500)
 
         # Search Control
         self.search_input = ft.TextField(
@@ -106,7 +131,7 @@ class ContactsView(ft.Container):
             on_change=self._handle_search,
         )
 
-        # Preview Container inside Dialog (Occupies 1/5 of the modal width ratio)
+        # Preview Container inside Dialog
         self.modal_avatar_container = ft.Container(
             width=110,
             height=110,
@@ -136,13 +161,14 @@ class ContactsView(ft.Container):
                                 # 1/5th Image Preview Column
                                 ft.Column(
                                     horizontal_alignment=cross_align_center,
-                                    spacing=10,
-                                    width=120,
+                                    spacing=8,
+                                    width=130,
                                     controls=[
                                         self.modal_avatar_container,
                                         create_secondary_button(
                                             "Upload Photo", on_click=self._pick_image_file
                                         ),
+                                        self.photo_status_text,
                                     ],
                                 ),
                                 # 4/5ths Input Controls Column
@@ -222,19 +248,75 @@ class ContactsView(ft.Container):
         self._render_contact_list()
         self.update()
 
+    def _copy_image_to_uploads(self, source_path: str) -> str:
+        """Copies source image into assets/uploads/contacts/ and returns relative asset path."""
+        if not source_path or not os.path.exists(source_path):
+            return source_path
+
+        os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+        abs_source = os.path.abspath(source_path)
+        abs_upload = os.path.abspath(UPLOAD_DIR)
+
+        # Avoid re-copying if image is already inside upload directory
+        if abs_source.startswith(abs_upload):
+            rel_path = os.path.relpath(abs_source, ASSETS_DIR).replace("\\", "/")
+            return f"/{rel_path}"
+
+        file_ext = os.path.splitext(source_path)[1].lower() or ".png"
+        unique_filename = f"contact_{uuid.uuid4().hex[:10]}{file_ext}"
+        destination_path = os.path.join(UPLOAD_DIR, unique_filename)
+
+        shutil.copy2(source_path, destination_path)
+
+        rel_path = os.path.relpath(destination_path, ASSETS_DIR).replace("\\", "/")
+        return f"/{rel_path}"
+
+    def _resolve_image_src_and_validity(self, image_path: str):
+        """Resolves asset path and validates file presence on local disk."""
+        if not image_path:
+            return None, False
+
+        # Relative asset path check (e.g., /uploads/contacts/contact_123.png)
+        if image_path.startswith("/") or image_path.startswith("\\") or image_path.startswith("uploads"):
+            clean_rel = image_path.lstrip("/\\")
+            full_disk_path = os.path.join(ASSETS_DIR, clean_rel)
+            if os.path.exists(full_disk_path):
+                return f"/{clean_rel.replace('\\', '/')}", True
+
+        # Fallback for legacy absolute paths
+        if os.path.exists(image_path):
+            rel_path = self._copy_image_to_uploads(image_path)
+            return rel_path, True
+
+        return None, False
+
     def _create_avatar_control(self, name: str, image_path: str = None, radius: int = 24) -> ft.Control:
-        """Helper generating circular thumbnails: image if valid, otherwise capitalized first letter avatar."""
+        """Generates thumbnail controls: ft.Image in clipped Container if valid, otherwise CircleAvatar."""
         initial = name[0].upper() if name and len(name) > 0 else "?"
         size_dim = radius * 2
 
-        if image_path and os.path.exists(image_path):
+        src_url, is_valid = self._resolve_image_src_and_validity(image_path)
+
+        if is_valid and src_url:
             img_fit = getattr(ft.ImageFit, "COVER", "cover")
+            clip_hard = getattr(ft.ClipBehavior, "HARD_EDGE", "hardEdge")
             return ft.Container(
                 width=size_dim,
                 height=size_dim,
                 border_radius=radius,
-                image_src=image_path,
-                image_fit=img_fit,
+                clip_behavior=clip_hard,
+                content=ft.Image(
+                    src=src_url,
+                    width=size_dim,
+                    height=size_dim,
+                    fit=img_fit,
+                    error_content=ft.CircleAvatar(
+                        content=ft.Text(initial, weight=ft.FontWeight.BOLD, size=radius - 2, color="onPrimaryContainer"),
+                        bgcolor="primaryContainer",
+                        radius=radius,
+                    ),
+                ),
             )
 
         return ft.CircleAvatar(
@@ -315,7 +397,6 @@ class ContactsView(ft.Container):
                 alignment=ft.MainAxisAlignment.SPACE_BETWEEN,
                 vertical_alignment=cross_align_center,
                 controls=[
-                    # Left side: Small circle avatar + Contact Name and details
                     ft.Row(
                         spacing=15,
                         expand=True,
@@ -331,7 +412,6 @@ class ContactsView(ft.Container):
                             ),
                         ],
                     ),
-                    # Right side: Link button & edit/delete actions
                     ft.Row(
                         spacing=4,
                         controls=[
@@ -371,11 +451,16 @@ class ContactsView(ft.Container):
             self.list_container.controls.append(card)
 
     def _update_modal_avatar_preview(self) -> None:
-        """Updates the 1/5th ratio modal avatar container preview."""
+        """Updates modal avatar preview with uploaded image or default initial."""
         current_name = self.name_input.value.strip() if self.name_input.value else "New Contact"
         self.modal_avatar_container.content = self._create_avatar_control(
             current_name, self.selected_image_path, radius=50
         )
+        if self.selected_image_path:
+            filename = os.path.basename(self.selected_image_path)
+            self.photo_status_text.value = f"Photo attached:\n{filename[:15]}..."
+        else:
+            self.photo_status_text.value = ""
 
     def _open_add_dialog(self, e: ft.ControlEvent) -> None:
         self.editing_contact_id = None
@@ -409,7 +494,7 @@ class ContactsView(ft.Container):
         close_dialog_compat(self.app_page, self.contact_dialog)
 
     async def _pick_image_file(self, e: ft.ControlEvent) -> None:
-        """Asynchronously invokes FilePicker and awaits results across modern Flet versions."""
+        """Asynchronously triggers FilePicker dialog."""
         file_picker = getattr(self.app_page, "file_picker", None)
         if not file_picker:
             self.error_text.value = "File picker control unavailable."
@@ -422,6 +507,7 @@ class ContactsView(ft.Container):
             res = file_picker.pick_files(
                 dialog_title="Select Contact Photo",
                 allow_multiple=False,
+                file_type=ft.FilePickerFileType.IMAGE,
             )
             if inspect.isawaitable(res):
                 result = await res
@@ -432,9 +518,11 @@ class ContactsView(ft.Container):
             self.app_page.update()
 
     def _handle_file_picked(self, e: ft.FilePickerResultEvent) -> None:
+        """Handles selected image event and saves relative asset path."""
         if e and hasattr(e, "files") and e.files and len(e.files) > 0:
             picked_path = e.files[0].path or e.files[0].name
-            self.selected_image_path = picked_path
+            saved_rel_path = self._copy_image_to_uploads(picked_path)
+            self.selected_image_path = saved_rel_path
             self._update_modal_avatar_preview()
             if hasattr(self.contact_dialog, "update") and callable(getattr(self.contact_dialog, "update")):
                 try:
@@ -466,6 +554,7 @@ class ContactsView(ft.Container):
                 notes=notes,
                 image_path=self.selected_image_path,
             )
+            action_msg = f"Contact '{name}' created successfully!"
         else:
             update_contact(
                 contact_id=self.editing_contact_id,
@@ -477,12 +566,15 @@ class ContactsView(ft.Container):
                 notes=notes,
                 image_path=self.selected_image_path,
             )
+            action_msg = f"Contact '{name}' updated successfully!"
 
         self._close_dialog()
         self._load_data()
         self.update()
+        show_snackbar(self.app_page, action_msg)
 
     def _handle_delete_contact(self, contact_id: int) -> None:
         delete_contact(contact_id)
         self._load_data()
         self.update()
+        show_snackbar(self.app_page, "Contact deleted successfully!")
